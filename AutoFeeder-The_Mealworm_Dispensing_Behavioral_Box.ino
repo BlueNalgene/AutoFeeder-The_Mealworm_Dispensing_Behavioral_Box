@@ -62,8 +62,8 @@ int modeToggle           = 0;          // This toggle can be values from 0 to 3.
                                        // 3 - This feeder will only feed birds with tags AND bird unique tests
 
 // IMPORTANT Addressing Bits
-int nodeAddress          = 0;          // 0 is Master, otherwise slave
-int maxNodes             = 1;          // Number of nodes.  Include the master.
+const int nodeAddress          = 0;          // 0 is Master, otherwise Slave
+const int maxNodes             = 1;          // Number of nodes.  Include the Master.
 
 // Do you have the above code correct?
 
@@ -88,11 +88,20 @@ volatile byte wormState  = 0;          // This is the worm detection bit. Now a 
 
 // Regular variables
 int correctFeeder;                     // Used to select feeder which is the correct answer
+byte statusFlag          = 0;          // This int is used by the Master to determine how to administer tasks
+                                       // Different values set different status flags
+                                       // 0 == Default.  There is no worm in the chamber, a reload is required.
+                                       // 1 == Loaded.   There is a worm in the chamber, but nothing exciting happened.
+byte flags[maxNodes];                  // Finally, we tell the Master to make an empty array of bytes for later.
 
 // Logging Parameter Constants
 const unsigned int polltime = 3000;    //How long in milliseconds to poll for tags 
 const unsigned int pausetime = 500;    //How long in milliseconds to wait between polling intervals 
 const unsigned int readFreq = 200;     //How long to wait after a tag is successfully read.
+
+// Variables for a simple speed test  // DEBUG
+byte clockState = LOW; // DEBUG
+int clockLine = 2; // DEBUG
 
  /*****************************************    
   *     
@@ -166,22 +175,22 @@ void setup() {  // This function sets everything up for logging.
   pinMode(servoTrans, OUTPUT);
 
 
-  // Now we need to set up communications between the nodes of our network (I2C has a master and one or more slaves)
+  // Now we need to set up communications between the nodes of our network (I2C has a Master and one or more Slaves)
   // The section of code below represents a simple setup of I2C and confirmation that each unit knows its ID.
 
-  //This starts the master else slave nodes.
-  if (nodeAddress == 0) {    // if you are a master
+  //This starts the Master else Slave nodes.
+  if (nodeAddress == 0) {    // if you are a Master
     Wire.begin();            // start your communications port
     delay(600);              // and wait for everyone else to catch up
   }
-  else {                     // otherwise, you are a slave
-    delay(30);               // hold on a moment while master does it's thing
+  else {                     // otherwise, you are a Slave
+    delay(30);               // hold on a moment while Master does it's thing
     Wire.begin(nodeAddress); // then turn on your communications port
   }
 
-  //If the node is a master, request 6 bytes from each slave
-  //If the node is a slave, respond to the request to say you a ready.
-  if (nodeAddress == 0 ) {                 // if this node is a master
+  //If the node is a Master, request 6 bytes from each Slave
+  //If the node is a Slave, respond to the request to say you a ready.
+  if (nodeAddress == 0 ) {                 // if this node is a Master
     for (int i = 1; i <= maxNodes; i++) {  // for each unit in our network (declared by maxNodes)
       Wire.requestFrom(i, 6);              // request 6 bytes.
       while(Wire.available()) {            // Listen for the bytes to come in.
@@ -192,8 +201,8 @@ void setup() {  // This function sets everything up for logging.
       }
     }
   }
-  else {                                   // otherwise, this unit is a slave
-    Wire.onRequest(startupRequest);        // so when the master asks, serve him what is in startupRequest
+  else {                                   // otherwise, this unit is a Slave
+    Wire.onRequest(startupRequest);        // so when the Master asks, serve him what is in startupRequest
     delay(60);                             // then wait a moment
   }
   // This concludes the I2C setup section
@@ -234,11 +243,29 @@ void setup() {  // This function sets everything up for logging.
   motorBrake();                              // Then brake.
   delay(60);                                 // let that sink in.
   motorOff();                                // And power down.  The plunger should be in just the right position
-  delay(300);                                // this delay is not strictly necessary, but nice as a segue.
+  delay(300);                                // this delay is not strictly necessary, but nice as a segue
 
 } // end setup        
 
 void loop() {  //This is the main function. It loops (repeats) forever.
+
+  // In this loop, the Master asks each Slave what its status is.
+  if (nodeAddress == 0) {                       // If this unit is the Master
+    for(int i = 0; i <= maxNodes;  ++i) {       // First we clean up our flag array...
+      flags[i] = (byte)0;                       // by making sure everything is a 0
+    }
+    flags[0] = statusFlag;                      // Then we put the Master's status in the array before the rest.
+    for (int i = 1; i <= maxNodes; i++) {       // For each node in the network...
+      Wire.requestFrom(i, 1);                   // ask each Slave for 1 byte...
+      while(Wire.available()) {                 // while each Slave communicates the requested byte...
+        flags[i] = Wire.read();                 // we add that byte to the flag array.
+      }                                         //
+    }                                           // Once that is taken care of, we need to analyze what we have.
+  }
+  else {
+    Wire.onReceive(flagReport);                // Listen for input from the Master, then execute flagReport
+    delay(300);                                // Give the I2C a chance to communicate with the others.
+  }
   
   // PLUNGER AT REST
   // This part of the cycle loads a worm if the unit has not registered a worm in the chamber
@@ -278,13 +305,13 @@ void loop() {  //This is the main function. It loops (repeats) forever.
   Serial.println("happydance"); // DEBUG
   
   // Now we can begin our Test
-  // The master will assign one of the nodes to be "correct" node for the test
-  if (nodeAddress == 0) {                       // If you are the master
+  // The Master will assign one of the nodes to be "correct" node for the test
+  if (nodeAddress == 0) {                       // If you are the Master
     correctFeeder = random(0, (maxNodes - 1) ); // pick the feeder which will feed at random from all of the nodes
     for (int i = 1; i <= maxNodes; i++) {       // For each node in the network...
       Wire.beginTransmission(i);                // tell each one...
       Wire.write(correctFeeder);                // which unit will be the "correct" test answer
-      Wire.endTransmission();                   // Close the communication line after telling each slave this info.
+      Wire.endTransmission();                   // Close the communication line after telling each Slave this info.
     }
     Serial.print("correctFeeder = ");  // DEBUG
     Serial.println(correctFeeder);  // DEBUG
@@ -306,45 +333,58 @@ void loop() {  //This is the main function. It loops (repeats) forever.
   // Now we have the worm loaded, and the color set and wait for our bird to arrive.
      
   while (leverPin == HIGH) {                 // While this switch is closed, nothing is happening
-  }                                          // So we wait, doing nothing.
+    delay(1000);                             // We perform a short delay.
+    statusFlag = 1;                          // We tell the status that a worm is loaded, but there is nothing to report.
+    return;                                  // And then we completely exit the void loop()
+  }                                          // 
 
   // EVENT - BIRD LANDS AT THIS FEEDER
   Serial.println("BIRD!");  //  DEBUG
   digitalWrite(SHD_PINA, HIGH);              //we activate RFID and begin scanning here.
                                              // NOTE that we only are looking at a single RFID pin. 
+
+  if (modeToggle != 0) {                       // If this is NOT a dumb feeder, we need to set up RFID
+                                               //scan for a tag - if a tag is sucesfully scanned, return a 'true' and proceed
+    currentMillis = millis();                  //To determine how long to poll for tags, first get the current 
+                                               //value of the built in millisecond clock on the processor
+    stopMillis = currentMillis + polltime;     //next add the value of polltime to the current clock time to 
+                                               //determine the desired stop time.
+    while(stopMillis > millis()) {             //As long as the stoptime is less than the current millisecond 
+                                               //counter, then keep looking for a tag
+      if (L.scanForTag(tagData) == true) {     //If a tag gets read, then do all the following stuff 
+                                               //(if not it will keep trying until the timer runs out)
+        if (correctFeeder == nodeAddress) {    // If the bird landed at the "correct" feeder...
+          logEvent(1);                         // Log this event with a 1 then begin feeding
+        }                                      
+        else {                                 // If the bird landed on the "wrong" feeder...
+          logEvent(0);                         // Log this event with a zero then ....
+          //////////////////////////////// tbc
+          return;
+          
+        }
+      }  
+    }
+    digitalWrite(SHD_PINA, LOW);    //Turn off both RFID circuits
+    delay(pausetime);    //pause between polling attempts  
+  }                                            // end of modeToggle if statement
+  while (digitalRead(doorSwitch) == HIGH) {  // While the trap door is not open
+            motorCCW();                              // Send the plunger down to open the door.
+          }                                          // And once it is down....
+          motorBrake();                              // STOP
+          delay(30);                                 // Let that sink in
+          motorOff();                                // Stop the motor completely
+          /////////////////////// tbc
                                                                                        
-  //scan for a tag - if a tag is sucesfully scanned, return a 'true' and proceed
-  currentMillis = millis();                  //To determine how long to poll for tags, first get the current 
-                                             //value of the built in millisecond clock on the processor
-  stopMillis = currentMillis + polltime;     //next add the value of polltime to the current clock time to 
-                                             //determine the desired stop time.
-  while(stopMillis > millis()) {             //As long as the stoptime is less than the current millisecond 
-                                             //counter, then keep looking for a tag
-    if (L.scanForTag(tagData) == true) {     //If a tag gets read, then do all the following stuff 
-                                             //(if not it will keep trying until the timer runs out)
-      if (correctFeeder == nodeAddress) {    // If the bird landed at the "correct" feeder...
-        logEvent(1);                         // Log this event with a 1 then begin feeding
-        while (digitalRead(doorSwitch) == HIGH) {  // While the trap door is not open
-          motorCCW();                              // Send the plunger down to open the door.
-        }                                          // And once it is down....
-        motorBrake();                              // STOP
-        delay(30);                                 // Let that sink in
-        motorOff();                                // Stop the motor completely
-        ///////////////////////
-      }
-      else {
-        logEvent(0);
-        
-      }
-    }  
-  }
-  digitalWrite(SHD_PINA, LOW);    //Turn off both RFID circuits
-  delay(pausetime);    //pause between polling attempts     
+     
 
   
       
  
   delay(5);
+
+  // Wes's little clock checker // DEBUG
+  clockState =! clockState; // DEBUG
+  digitalWrite(clockLine, clockState); // DEBUG
 }   // end void loop
 
 
@@ -405,7 +445,7 @@ void motorBrake() {
 }
 
 void colorTWI(int numBytes) {              // This tells a Slave the "correct" unit.
-  correctFeeder = Wire.read();             // Whatever the master tells you over I2C is the answer
+  correctFeeder = Wire.read();             // Whatever the Master tells you over I2C is the answer
   if (correctFeeder == nodeAddress) {      // If your node number is the "correct" answer...
     servoMove(degColor1);                  // Then turn your indicator to green.
   }
@@ -433,6 +473,9 @@ void logEvent(byte correctChoice) {
     else {
       //Serial.println("error opening datalog.txt");  //error message if the "datafile.txt" is not present or cannot be created
     }// end check for file
+}
+
+void flagReport(int statusFlag) {  // placeholder for now.  Figure out what is going on with the INT.
 }
 
 
@@ -464,7 +507,7 @@ static uint8_t conv2d(const char* p) { // Convert parts of a string to decimal n
 
 void initclk () {                //Start the clock running if it is not already
   Wire.begin();                  //Start up the I2C comm funcitons
-  Wire.beginTransmission(0x68);  //Send the clock slave address
+  Wire.beginTransmission(0x68);  //Send the clock Slave address
   Wire.write(0x0C);              //address for clearing the HT (halt time?) bit
   Wire.write(0x3F);              //HT is bit 6 so 00111111 clears it.
   Wire.endTransmission();        //End the I2C transmission
