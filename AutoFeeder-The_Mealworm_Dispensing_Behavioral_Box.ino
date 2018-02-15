@@ -62,8 +62,8 @@ int modeToggle           = 0;          // This toggle can be values from 0 to 3.
                                        // 3 - This feeder will only feed birds with tags AND bird unique tests
 
 // IMPORTANT Addressing Bits
-const int nodeAddress          = 0;          // 0 is Master, otherwise Slave
-const int maxNodes             = 1;          // Number of nodes.  Include the Master.
+const int nodeAddress    = 0;          // 0 is Master, otherwise Slave
+const int maxNodes       = 1;          // Number of nodes.  Include the Master.
 
 // Do you have the above code correct?
 
@@ -249,86 +249,29 @@ void setup() {  // This function sets everything up for logging.
 
 void loop() {  //This is the main function. It loops (repeats) forever.
 
-  // In this loop, the Master asks each Slave what its status is.
-  if (nodeAddress == 0) {                       // If this unit is the Master
-    for(int i = 0; i <= maxNodes;  ++i) {       // First we clean up our flag array...
-      flags[i] = (byte)0;                       // by making sure everything is a 0
-    }
-    flags[0] = statusFlag;                      // Then we put the Master's status in the array before the rest.
-    for (int i = 1; i <= maxNodes; i++) {       // For each node in the network...
-      Wire.requestFrom(i, 1);                   // ask each Slave for 1 byte...
-      while(Wire.available()) {                 // while each Slave communicates the requested byte...
-        flags[i] = Wire.read();                 // we add that byte to the flag array.
-      }                                         //
-    }                                           // Once that is taken care of, we need to analyze what we have.
-  }
-  else {
-    Wire.onReceive(flagReport);                // Listen for input from the Master, then execute flagReport
-    delay(300);                                // Give the I2C a chance to communicate with the others.
-  }
+  checkStatus();
   
   // PLUNGER AT REST
-  // This part of the cycle loads a worm if the unit has not registered a worm in the chamber
-  while (wormState == HIGH) {                   //only executes if we don't have a worm in the feeder
-    while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the top switch
-      motorCW();                                // move the plunger to the top.
-    }                                           // once it hits to top...
-    motorBrake();                               // Stop.
-    delay(30);                                  // let that sink in
-    motorOff();                                 // power down the motor
-    delay(4000);                                // Give anything picked up by the motor time to roll into the chamber
-                                                // If nothing has hit the wormSwitch, then the wormState will still be HIGH.
-    // PLUNGER AT TOP                           // If that is the case, while loop needs to go back to the bottom
-                                                // to make another pass
-    motorCCW();                                 // Send the motor back down
-    delay(300);                                 // Give the plunger time to stop touching the top switch.
-    while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the bottom switch
-      motorCCW();                               // continue moving down
-    }  // PLUNGER AT REST                       // Once it hits the bottom switch...
-    motorBrake();                               // stop
-    delay(60);                                  // Wait a moment before starting this while loop again.
-  }                                             // Or exit if you have the worm.
 
-  // PLUNGER AT TOP                             // When we exit the previous loop, we expect it will be after dumping a worm.
-                                                // So we need to take it back down to the reset position
-  motorCCW();                                   // Send the motor back down
-  delay(300);                                   // Give the plunger time to stop touching the top switch.
-  while (digitalRead(feederSwitch) == HIGH) {   // Until the plunger hits the bottom switch
-    motorCCW();                                 // continue moving down
-  }                                             // Once it hits the bottom switch...
-  motorBrake();                                 // stop
-  delay(30);                                    // Let that sink in
-  motorOff();                                   // Then cut power to the motor.
-  delay(30);                                    // And let that sink in before continuing the test.
-
-  // PLUNGER AT REST 
-  Serial.println("happydance"); // DEBUG
+  wormLoader();
   
-  // Now we can begin our Test
-  // The Master will assign one of the nodes to be "correct" node for the test
-  if (nodeAddress == 0) {                       // If you are the Master
-    correctFeeder = random(0, (maxNodes - 1) ); // pick the feeder which will feed at random from all of the nodes
-    for (int i = 1; i <= maxNodes; i++) {       // For each node in the network...
-      Wire.beginTransmission(i);                // tell each one...
-      Wire.write(correctFeeder);                // which unit will be the "correct" test answer
-      Wire.endTransmission();                   // Close the communication line after telling each Slave this info.
-    }
-    Serial.print("correctFeeder = ");  // DEBUG
-    Serial.println(correctFeeder);  // DEBUG
-    delay(60);                                 // And wait a moment after you are done.
-    if (correctFeeder == nodeAddress) {        // If the Master was the "correct" feeder
-      servoMove(degColor1);                    // Move the color wheel to the green indicator
-      Serial.println("I'm Green"); // DEBUG
-    }
-    else {                                     // If the Master was NOT the "correct" feeder
-      servoMove(degColor3);                    // Move the color wheel to the red indicator
-      Serial.println("I'm Red"); // DEBUG
-    }
-  }                                            // This ends the Master section
-  else {                                       // If you were not the Master, you must be a Slave
-    Wire.onReceive(colorTWI);                  // Listen for input from the Master, then execute colorTWI
-    delay(300);                                // Give the I2C a chance to communicate with the others.
+  
+
+  if (modeToggle == 1 || modeToggle == 2) {     // If the mode is 1 OR 2
+    colorTest();                                // The color wheel test is performed
+  }                                             // 
+  else if (modeToggle == 3) {                   // If the mode is 3
+    individualTest();                           // A special variant of the color wheel test is called
+  }                                             // 
+  else if (modeToggle == 0) {                   // If the mode is 0
+  }                                             // continue loop for a dumb feeder.
+  else {                                        // If the mode toggle is not properly set
+    Serial.print("ERROR: modeToggle = ");       // Report a debugging error to the user
+    Serial.println(modeToggle);                 // This is what you set it as
+    Serial.println("   only 0-3 are valid");    // This is the range you should have used
+    Serial.println("Running as RFID Feeder");   // RFID only (mode 1). Feed birds.
   }
+  
   
   // Now we have the worm loaded, and the color set and wait for our bird to arrive.
      
@@ -362,18 +305,30 @@ void loop() {  //This is the main function. It loops (repeats) forever.
           return;
           
         }
-      }  
-    }
-    digitalWrite(SHD_PINA, LOW);    //Turn off both RFID circuits
-    delay(pausetime);    //pause between polling attempts  
-  }                                            // end of modeToggle if statement
-  while (digitalRead(doorSwitch) == HIGH) {  // While the trap door is not open
-            motorCCW();                              // Send the plunger down to open the door.
-          }                                          // And once it is down....
-          motorBrake();                              // STOP
-          delay(30);                                 // Let that sink in
-          motorOff();                                // Stop the motor completely
-          /////////////////////// tbc
+      }                                        // end millis countdown
+    }                                          // end modeToggle != 0
+    digitalWrite(SHD_PINA, LOW);                     //Turn off both RFID circuits
+    delay(pausetime);                                //pause between polling attempts  
+  }                                                  // end of modeToggle if statement
+  while (digitalRead(doorSwitch) == HIGH) {          // While the trap door is not open
+    motorCCW();                                      // Send the plunger down to open the door.
+  }                                                  // And once it is down....
+  motorBrake();                                      // STOP
+  delay(30);                                         // Let that sink in
+  motorOff();                                        // Stop the motor completely
+  delay(1000);                                       // Wait 1 second...
+  while (digitalRead(feederSwitch) == LOW) {         // While the plunger is down such that feederSwitch says it is not at rest
+    motorCW();                                       // move the plunger up
+  }                                                  // When it hits the button
+  motorBrake();                                      // STOP
+  delay(30);                                         // Let that sink in
+  motorOff();                                        // Stop the motor completely
+
+  // PLUNGER AT REST
+
+
+
+          
                                                                                        
      
 
@@ -455,7 +410,7 @@ void colorTWI(int numBytes) {              // This tells a Slave the "correct" u
 }                                          // Now the Slaves are displaying the correct indication for the test.
 
 void logEvent(byte correctChoice) {
-  getTime();                           //Call a subroutine function that reads the time from the clock
+  getTime();                               //Call a subroutine function that reads the time from the clock
   File dataFile = SD.open("datalog.txt", FILE_WRITE);        //Initialize the SD card and open the file or create if not there.
     if (dataFile) {                              
       for (int n = 0; n < 5; n++) {               //loop to print out the RFID code to the SD card
@@ -465,9 +420,9 @@ void logEvent(byte correctChoice) {
       dataFile.print(",");                        //comma for data delineation
       dataFile.print(RFcircuit);                  //log which antenna was active
       dataFile.print(",");                        //comma for data delineation
-      dataFile.print(timeString);               //log the time
-      dataFile.print(",");
-      dataFile.println(correctChoice);
+      dataFile.print(timeString);                 //log the time
+      dataFile.print(",");                        //comma for... you know the rest
+      dataFile.println(correctChoice);            //log whether the bird made the correct choice or not.
       dataFile.close();                           //close the file
     } // check dataFile is present
     else {
@@ -478,7 +433,112 @@ void logEvent(byte correctChoice) {
 void flagReport(int statusFlag) {  // placeholder for now.  Figure out what is going on with the INT.
 }
 
+void colorTest() {
+  // Now we can begin our Test
+  // The Master will assign one of the nodes to be "correct" node for the test
+  if (nodeAddress == 0) {                       // If you are the Master
+    correctFeeder = random(0, (maxNodes - 1) ); // pick the feeder which will feed at random from all of the nodes
+    for (int i = 1; i <= maxNodes; i++) {       // For each node in the network...
+      Wire.beginTransmission(i);                // tell each one...
+      Wire.write(correctFeeder);                // which unit will be the "correct" test answer
+      Wire.endTransmission();                   // Close the communication line after telling each Slave this info.
+    }
+    Serial.print("correctFeeder = ");  // DEBUG
+    Serial.println(correctFeeder);  // DEBUG
+    delay(60);                                 // And wait a moment after you are done.
+    if (correctFeeder == nodeAddress) {        // If the Master was the "correct" feeder
+      servoMove(degColor1);                    // Move the color wheel to the green indicator
+      Serial.println("I'm Green"); // DEBUG
+    }
+    else {                                     // If the Master was NOT the "correct" feeder
+      servoMove(degColor3);                    // Move the color wheel to the red indicator
+      Serial.println("I'm Red"); // DEBUG
+    }
+  }                                            // This ends the Master section
+  else {                                       // If you were not the Master, you must be a Slave
+    Wire.onReceive(colorTWI);                  // Listen for input from the Master, then execute colorTWI
+    delay(300);                                // Give the I2C a chance to communicate with the others.
+  }
+}
 
+void individualTest() {
+  // Placeholder for bird-specific tests.  TBD
+}
+
+void checkStatus() {  // In this function, the Master asks each Slave what its status is.  Then acts on it.
+  for(int i = 0; i <= maxNodes;  ++i) {         // First we clean up our flag array...
+    flags[i] = (byte)0;                         // by making sure everything is a 0
+  }
+  // Master Reader - Slave Sender
+  if (nodeAddress == 0) {                       // If this unit is the Master
+    flags[0] = statusFlag;                      // Then we put the Master's status in the array before the rest.
+    for (int i = 1; i <= maxNodes; i++) {       // For each node in the network...
+      Wire.requestFrom(i, 1);                   // ask each Slave for 1 byte...
+      while(Wire.available()) {                 // while each Slave communicates the requested byte...
+        flags[i] = Wire.read();                 // we add that byte to the flag array.
+      }                                         //
+    }                                           // Once that is taken care of, we need to analyze what we have.
+  }                                             //
+  else {                                        // Otherwise, this unit is a Slave
+    Wire.onReceive(flagReport);                 // Listen for input from the Master, then execute flagReport
+    delay(300);                                 // Give the I2C a chance to communicate with the others.
+  }
+
+  // Master Writer - Slave Receiver
+  if (nodeAddress == 0) {                       // If this unit is the Master
+    flagLen = sizeof(flags);                    // Calculate the size of the flags array in bytes
+    for(int i = 1; i <= maxNodes;  ++i) {       // For each node in the network...
+      Wire.beginTransmission(i);                // send to that unit...
+      Wire.write(flagLen);                      // the length of the array
+      Wire.endTransmission();                   // Then stop
+      delay(50);                                // Wait a moment
+      Wire.beginTransmission(i);                // Then send to that unit....
+      Wire.write(flags);                        // the actual array
+      Wire.endTransmission();                   // Then stop
+    }                                           //
+  }                                             //
+  else {                                        // Otherwise, this unit is a Slave
+    /////////////////////////// tbc
+  }                                             //
+}                                               //
+
+void wormLoader() {
+  // This function loads a worm if the unit has not registered a worm in the chamber
+  while (wormState == HIGH) {                   //only executes if we don't have a worm in the feeder
+    while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the top switch
+      motorCW();                                // move the plunger to the top.
+    }                                           // once it hits to top...
+    motorBrake();                               // Stop.
+    delay(30);                                  // let that sink in
+    motorOff();                                 // power down the motor
+    delay(4000);                                // Give anything picked up by the motor time to roll into the chamber
+                                                // If nothing has hit the wormSwitch, then the wormState will still be HIGH.
+    // PLUNGER AT TOP                           // If that is the case, while loop needs to go back to the bottom
+                                                // to make another pass
+    motorCCW();                                 // Send the motor back down
+    delay(300);                                 // Give the plunger time to stop touching the top switch.
+    while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the bottom switch
+      motorCCW();                               // continue moving down
+    }  // PLUNGER AT REST                       // Once it hits the bottom switch...
+    motorBrake();                               // stop
+    delay(60);                                  // Wait a moment before starting this while loop again.
+  }                                             // Or exit if you have the worm.
+
+  // PLUNGER AT TOP                             // When we exit the previous loop, we expect it will be after dumping a worm.
+                                                // So we need to take it back down to the reset position
+  motorCCW();                                   // Send the motor back down
+  delay(300);                                   // Give the plunger time to stop touching the top switch.
+  while (digitalRead(feederSwitch) == HIGH) {   // Until the plunger hits the bottom switch
+    motorCCW();                                 // continue moving down
+  }                                             // Once it hits the bottom switch...
+  motorBrake();                                 // stop
+  delay(30);                                    // Let that sink in
+  motorOff();                                   // Then cut power to the motor.
+  delay(30);                                    // And let that sink in before continuing the test.
+
+  // PLUNGER AT REST 
+  Serial.println("happydance"); // DEBUG
+}
 
 
 
