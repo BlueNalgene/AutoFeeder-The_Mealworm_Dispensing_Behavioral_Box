@@ -88,10 +88,11 @@ volatile byte wormState  = 0;          // This is the worm detection bit. Now a 
 
 // Regular variables
 int correctFeeder;                     // Used to select feeder which is the correct answer
-byte statusFlag          = 0;          // This int is used by the Master to determine how to administer tasks
+byte statusFlag          = 1;          // This int is used by the Master to determine how to administer tasks
                                        // Different values set different status flags
-                                       // 0 == Default.  There is no worm in the chamber, a reload is required.
-                                       // 1 == Loaded.   There is a worm in the chamber, but nothing exciting happened.
+                                       // 0 == Default.  All is well/Nothing to report.
+                                       // 1 == Unloaded. This unit fed a bird recently. Starts up Unloaded.
+                                       // 2 == Fail.     A bird made a mistake at this feeder.
 byte flags[maxNodes];                  // Finally, we tell the Master to make an empty array of bytes for later.
 
 // Logging Parameter Constants
@@ -245,7 +246,10 @@ void setup() {  // This function sets everything up for logging.
   motorOff();                                // And power down.  The plunger should be in just the right position
   delay(300);                                // this delay is not strictly necessary, but nice as a segue
 
-} // end setup        
+} // end setup 
+
+
+       
 
 void loop() {  //This is the main function. It loops (repeats) forever.
 
@@ -298,9 +302,11 @@ void loop() {  //This is the main function. It loops (repeats) forever.
                                                //(if not it will keep trying until the timer runs out)
         if (correctFeeder == nodeAddress) {    // If the bird landed at the "correct" feeder...
           logEvent(1);                         // Log this event with a 1 then begin feeding
+          statusFlag = 1;                      // Set the flag saying a bird was fed.
         }                                      
         else {                                 // If the bird landed on the "wrong" feeder...
           logEvent(0);                         // Log this event with a zero then ....
+          statusFlag = 2;                      // Set the flag saying a bird failed a test.
           //////////////////////////////// tbc
           return;
           
@@ -486,19 +492,32 @@ void checkStatus() {  // In this function, the Master asks each Slave what its s
 
   // Master Writer - Slave Receiver
   if (nodeAddress == 0) {                       // If this unit is the Master
-    flagLen = sizeof(flags);                    // Calculate the size of the flags array in bytes
     for(int i = 1; i <= maxNodes;  ++i) {       // For each node in the network...
       Wire.beginTransmission(i);                // send to that unit...
-      Wire.write(flagLen);                      // the length of the array
-      Wire.endTransmission();                   // Then stop
-      delay(50);                                // Wait a moment
-      Wire.beginTransmission(i);                // Then send to that unit....
-      Wire.write(flags);                        // the actual array
+      Wire.write(flags, maxNodes);              // the array
       Wire.endTransmission();                   // Then stop
     }                                           //
   }                                             //
   else {                                        // Otherwise, this unit is a Slave
-    /////////////////////////// tbc
+    receiveFlags(maxNodes);                     // The slave receives the flag array.
+  }                                             //
+  delay(10);                                    // Everybody does the delay and what follows
+  for (int i = 0; i <= sizeof(flags); i++) {    // For each flag in the array:
+            // Current Flag Identities:
+            // 0 - No change/all is well
+            // 1 - This unit fed a bird
+            // 2 - A bird failed a test
+    if (flags[i] == 1 && i == nodeAddress) {    // If the value is 1 AND also your address
+      wormLoader();                             // Reload
+    }                                           // Nice and simple
+    else if (flags[i] == 1 && i != nodeAddress) { // If a bird got fed, but it isn't your problem
+      delay(60);                                // Delay a bit.
+    }
+    else if (flags[i] == 2) {                   // If a bird just failed on a test
+      servoMove(degColor2);                     // Turn the wheel to white
+      delay(10000);                             // Wait 10 seconds
+      statusFlag = 0;                           // And prepare to go again.
+    }                                           //
   }                                             //
 }                                               //
 
@@ -534,12 +553,24 @@ void wormLoader() {
   motorBrake();                                 // stop
   delay(30);                                    // Let that sink in
   motorOff();                                   // Then cut power to the motor.
+  statusFlag = 0;                               // Report that you have successfully loaded a worm.
   delay(30);                                    // And let that sink in before continuing the test.
 
   // PLUNGER AT REST 
   Serial.println("happydance"); // DEBUG
 }
 
+void receiveFlags(int byteLength) {             // This is the function for Slaves to receive flags
+  while (1 < Wire.available()) {                // While the Wire is available
+    char c = Wire.read();                       // Read each byte (aka char in Arduino C)....
+    for (int i = 0; i <= byteLength;  ++i) {    // and each time you read one of these
+      flags[i] = c;                             // put it in the empty flags array at the correct spot.
+    }                                           // until we reach the end of the info.
+  }                                             // Then the while ends.
+  for (int i = 0; i <= maxNodes;  ++i) { // DEBUG
+    Serial.println(flags[i]); // DEBUG
+  }
+}
 
 
 
