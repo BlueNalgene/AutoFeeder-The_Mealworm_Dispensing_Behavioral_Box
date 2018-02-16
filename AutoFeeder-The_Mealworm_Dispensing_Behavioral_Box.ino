@@ -231,6 +231,7 @@ void setup() {  // This function sets everything up for logging.
   }// end check SD
 
   // Begin a cycle to release anything which is in the chamber and ensure position of plunger
+  Serial.println("Reset Plunger");  // DEBUG
   while (digitalRead(doorSwitch) == HIGH) {  // While the plunger is not opening the door
     motorCCW();                              // move the motor such that it will open the door
   }                                          // once the doorSwitch says the door is open
@@ -252,12 +253,12 @@ void setup() {  // This function sets everything up for logging.
        
 
 void loop() {  //This is the main function. It loops (repeats) forever.
-
+  Serial.println("CheckStatus");  // DEBUG
   checkStatus();
   
   // PLUNGER AT REST
-
-  wormLoader();
+  Serial.println("WormLoader");  // DEBUG
+  //wormLoader();
   
   
 
@@ -482,6 +483,7 @@ void checkStatus() {  // In this function, the Master asks each Slave what its s
       Wire.requestFrom(i, 1);                   // ask each Slave for 1 byte...
       while(Wire.available()) {                 // while each Slave communicates the requested byte...
         flags[i] = Wire.read();                 // we add that byte to the flag array.
+        Serial.println(flags[i]);  // DEBUG
       }                                         //
     }                                           // Once that is taken care of, we need to analyze what we have.
   }                                             //
@@ -508,9 +510,11 @@ void checkStatus() {  // In this function, the Master asks each Slave what its s
             // 1 - This unit fed a bird
             // 2 - A bird failed a test
     if (flags[i] == 1 && i == nodeAddress) {    // If the value is 1 AND also your address
+      Serial.println("Wormloader2");  // DEBUG
       wormLoader();                             // Reload
     }                                           // Nice and simple
     else if (flags[i] == 1 && i != nodeAddress) { // If a bird got fed, but it isn't your problem
+      Serial.println("Waiting on Other");  // DEBUG
       delay(60);                                // Delay a bit.
     }
     else if (flags[i] == 2) {                   // If a bird just failed on a test
@@ -535,12 +539,17 @@ void wormLoader() {
     // PLUNGER AT TOP                           // If that is the case, while loop needs to go back to the bottom
                                                 // to make another pass
     motorCCW();                                 // Send the motor back down
-    delay(300);                                 // Give the plunger time to stop touching the top switch.
+    delay(3000);                                 // Give the plunger time to stop touching the top switch.
     while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the bottom switch
       motorCCW();                               // continue moving down
     }  // PLUNGER AT REST                       // Once it hits the bottom switch...
     motorBrake();                               // stop
-    delay(60);                                  // Wait a moment before starting this while loop again.
+    delay(60);                                  // Wait a moment 
+    while (digitalRead(feederSwitch) == LOW) {  // While the plunger is down
+      motorCW();                                // Go back up to unpress it...
+    }                                           // and then...
+    delay(60);                                  // delay for a moment to deal with switch bounce
+    Serial.println("While Loop");  // DEBUG
   }                                             // Or exit if you have the worm.
 
   // PLUNGER AT TOP                             // When we exit the previous loop, we expect it will be after dumping a worm.
