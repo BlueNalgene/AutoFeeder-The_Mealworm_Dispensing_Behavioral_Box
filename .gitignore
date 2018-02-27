@@ -3,3 +3,4 @@
 # Temporary files
 # Ignore temporary LibreCAD files
 \#*.dxf
+\.dxf~
