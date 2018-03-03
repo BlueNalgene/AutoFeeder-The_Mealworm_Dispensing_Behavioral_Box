@@ -74,6 +74,7 @@ const int degColor3      = 120;        // green on color spinner (see diagram)
 
 // Pin Assignments
 const int wormSwitch     = 6;          // Mechanical mylar switch to detect falling worm.
+const int wormInter      = 5;          // Interrupt pin to be used for interrupt processing.
 const int servoTrans     = 10;         // Transistor enables the servo
 const int leverPin       = 11;         // This is the perch of the birdfeeder.
 const int doorSwitch     = 12;         // Switch detects door open
@@ -164,10 +165,12 @@ void setup() {  // This function sets everything up for logging.
   pinMode(doorSwitch, INPUT_PULLUP);    // is open, and the switch is in the HIGH state.
 
   // Interrupts are declared
-  attachInterrupt(wormSwitch, worm_ISR, CHANGE); //Any CHANGE on pin wormSwitch will instantly interrupt with code in worm_ISR
+  attachInterrupt(wormInter, worm_ISR, FALLING); //Any low voltage on pin wormSwitch will instantly interrupt with code in worm_ISR
 
   // Interrupt volatile byte is set here.  Presumably the switch is not closed during setup.
-  wormState = digitalRead(wormSwitch);
+  wormState = digitalRead(wormInter);
+  Serial.print("wormState = ");  // DEBUG
+  Serial.println(wormState);  // DEBUG
 
   // The servo library is told to do work on servoPin
   myservo.attach(servoPin);
@@ -223,29 +226,35 @@ void setup() {  // This function sets everything up for logging.
       setClk();                        //if the user enters "Y" (89) then call the clock setting function
     }
     
-  //Set up the SD card
-  Serial.print("Initializing SD card...\n");              //message to user
-  if (!SD.begin(chipSelect)) {                            //Initiate the SD card function with the pin that activates the card.
-    Serial.println("\nSD card failed, or not present");   //SD card error message
-    return;
-  }// end check SD
+//  //Set up the SD card
+//  Serial.print("Initializing SD card...\n");              //message to user
+//  if (!SD.begin(chipSelect)) {                            //Initiate the SD card function with the pin that activates the card.
+//    Serial.println("\nSD card failed, or not present");   //SD card error message
+//    return;
+//  }// end check SD
 
   // Begin a cycle to release anything which is in the chamber and ensure position of plunger
   Serial.println("Reset Plunger");  // DEBUG
+  Serial.println("CCW");  // DEBUG
   while (digitalRead(doorSwitch) == HIGH) {  // While the plunger is not opening the door
     motorCCW();                              // move the motor such that it will open the door
   }                                          // once the doorSwitch says the door is open
   motorBrake();                              // Brake yourself before you break yourself
   delay(60);                                 // Give that a moment to sink in.
+  Serial.println("STOP");  // DEBUG
   motorOff();                                // And power down the motor once it has stopped (why waste energy on brakes?)
   delay(1000);                               // Give anything in the chamber a second to roll out
+  Serial.println("CW");  // DEBUG
   while (digitalRead(feederSwitch) == LOW) { // When the door is open like that, the feederSwitch is going nuts. 
     motorCW();                               // while it is busy going nuts, roll that plunger back up
   }                                          // until the feederSwitch stops making a racket.
   motorBrake();                              // Then brake.
   delay(60);                                 // let that sink in.
+  Serial.println("STOP");  // DEBUG
   motorOff();                                // And power down.  The plunger should be in just the right position
   delay(300);                                // this delay is not strictly necessary, but nice as a segue
+  Serial.println("Plunger Reset");  // DEBUG
+
 
 } // end setup 
 
@@ -512,6 +521,7 @@ void checkStatus() {  // In this function, the Master asks each Slave what its s
     if (flags[i] == 1 && i == nodeAddress) {    // If the value is 1 AND also your address
       Serial.println("Wormloader2");  // DEBUG
       wormLoader();                             // Reload
+      Serial.println("Wormloader2 Ended");  // DEBUG
     }                                           // Nice and simple
     else if (flags[i] == 1 && i != nodeAddress) { // If a bird got fed, but it isn't your problem
       Serial.println("Waiting on Other");  // DEBUG
@@ -539,7 +549,7 @@ void wormLoader() {
     // PLUNGER AT TOP                           // If that is the case, while loop needs to go back to the bottom
                                                 // to make another pass
     motorCCW();                                 // Send the motor back down
-    delay(3000);                                 // Give the plunger time to stop touching the top switch.
+    delay(1000);                                 // Give the plunger time to stop touching the top switch.
     while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the bottom switch
       motorCCW();                               // continue moving down
     }  // PLUNGER AT REST                       // Once it hits the bottom switch...
@@ -551,7 +561,7 @@ void wormLoader() {
     delay(60);                                  // delay for a moment to deal with switch bounce
     Serial.println("While Loop");  // DEBUG
   }                                             // Or exit if you have the worm.
-
+  Serial.println("Worm Sign!!!!");  // DEBUG
   // PLUNGER AT TOP                             // When we exit the previous loop, we expect it will be after dumping a worm.
                                                 // So we need to take it back down to the reset position
   motorCCW();                                   // Send the motor back down
