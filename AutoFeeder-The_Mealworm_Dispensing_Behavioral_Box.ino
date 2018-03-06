@@ -128,6 +128,11 @@ int clockLine = 2; // DEBUG
   *            \___________/
   *            
   *****************************************/
+  /*****************************************
+   * In Current Mechanical Configuration
+   *       C C W = Plunger DOWN
+   *         C W = Plunger UP
+   ****************************************/
 
 
 
@@ -374,7 +379,6 @@ void loop() {  //This is the main function. It loops (repeats) forever.
 
 void worm_ISR() {
   wormState =! wormState;
-  delay(500);
 }
 
 void servoMove(int deg) {
@@ -399,14 +403,12 @@ void motorCW() {
   digitalWrite(feederMotor1, LOW);
   digitalWrite(feederMotor2, HIGH);
   digitalWrite(feederMotor3, HIGH);
-  delay(5);
 }
 
 void motorCCW() {
   digitalWrite(feederMotor1, HIGH);
   digitalWrite(feederMotor2, LOW);
   digitalWrite(feederMotor3, HIGH);
-  delay(5);
 }
 
 void motorBrake() {
@@ -544,31 +546,46 @@ void wormLoader() {
     motorBrake();                               // Stop.
     delay(30);                                  // let that sink in
     motorOff();                                 // power down the motor
+    Serial.println("4sec pause");  // DEBUG
     delay(4000);                                // Give anything picked up by the motor time to roll into the chamber
                                                 // If nothing has hit the wormSwitch, then the wormState will still be HIGH.
     // PLUNGER AT TOP                           // If that is the case, while loop needs to go back to the bottom
                                                 // to make another pass
     motorCCW();                                 // Send the motor back down
-    delay(1000);                                 // Give the plunger time to stop touching the top switch.
+    delay(200);                                 // Give the plunger time to stop touching the top switch.
     while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the bottom switch
       motorCCW();                               // continue moving down
-    }  // PLUNGER AT REST                       // Once it hits the bottom switch...
-    motorBrake();                               // stop
-    delay(60);                                  // Wait a moment 
+    }  // PLUNGER AT BOTTOM                     // Once it hits the bottom switch...
+    delay(60);
+//    motorBrake();                               // stop
+//    delay(60);                                  // Wait a moment 
+//    motorOff();                                 // Stop the motor completely
+//    Serial.println("littlepaws");  // DEBUG
+//    delay(60);                                  // Wait a moment
     while (digitalRead(feederSwitch) == LOW) {  // While the plunger is down
       motorCW();                                // Go back up to unpress it...
     }                                           // and then...
-    delay(60);                                  // delay for a moment to deal with switch bounce
+    delay(60);
+    motorBrake();                               // stop
+    delay(60);                                  // Wait a moment 
+    motorOff();                                 // delay for a moment to deal with switch bounce
     Serial.println("While Loop");  // DEBUG
+    delay(2000);
   }                                             // Or exit if you have the worm.
+  delay(60);
   Serial.println("Worm Sign!!!!");  // DEBUG
   // PLUNGER AT TOP                             // When we exit the previous loop, we expect it will be after dumping a worm.
                                                 // So we need to take it back down to the reset position
   motorCCW();                                   // Send the motor back down
-  delay(300);                                   // Give the plunger time to stop touching the top switch.
+  delay(200);                                   // Give the plunger time to stop touching the top switch.
   while (digitalRead(feederSwitch) == HIGH) {   // Until the plunger hits the bottom switch
     motorCCW();                                 // continue moving down
   }                                             // Once it hits the bottom switch...
+  delay(60);
+  while (digitalRead(feederSwitch) == LOW) {
+    motorCW();
+  }
+  delay(60);
   motorBrake();                                 // stop
   delay(30);                                    // Let that sink in
   motorOff();                                   // Then cut power to the motor.
