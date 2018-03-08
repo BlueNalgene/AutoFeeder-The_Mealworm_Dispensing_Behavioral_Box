@@ -76,7 +76,7 @@ const int degColor3      = 120;        // green on color spinner (see diagram)
 const int wormSwitch     = 6;          // Mechanical mylar switch to detect falling worm.
 const int wormInter      = 5;          // Interrupt pin to be used for interrupt processing.
 const int servoTrans     = 10;         // Transistor enables the servo
-const int leverPin       = 11;         // This is the perch of the birdfeeder.
+const int leverPin       = 9;         // This is the perch of the birdfeeder.
 const int doorSwitch     = 12;         // Switch detects door open
 const int feederSwitch   = 13;         // Switches at top and bottom of plunger are attached here.
 const int feederMotor1   = 2;          // TB6612FNG In1 to servo breakout board.
@@ -85,7 +85,7 @@ const int feederMotor3   = 4;          // TB6612FNG PWM to servo breakout board.
 const int servoPin       = A2;         // Output to data line of servo.  Requires PWM
 
 // Volatile variables
-volatile byte wormState  = 0;          // This is the worm detection bit. Now a physical switch.
+volatile byte wormState  = LOW;        // This is the worm detection bit. Now a physical switch.
 
 // Regular variables
 int correctFeeder;                     // Used to select feeder which is the correct answer
@@ -170,10 +170,10 @@ void setup() {  // This function sets everything up for logging.
   pinMode(doorSwitch, INPUT_PULLUP);    // is open, and the switch is in the HIGH state.
 
   // Interrupts are declared
-  attachInterrupt(wormInter, worm_ISR, FALLING); //Any low voltage on pin wormSwitch will instantly interrupt with code in worm_ISR
+  attachInterrupt(digitalPinToInterrupt(wormSwitch), worm_ISR, FALLING); //Any low voltage on pin wormSwitch will instantly interrupt with code in worm_ISR
 
   // Interrupt volatile byte is set here.  Presumably the switch is not closed during setup.
-  wormState = digitalRead(wormInter);
+  wormState = digitalRead(wormSwitch);
   Serial.print("wormState = ");  // DEBUG
   Serial.println(wormState);  // DEBUG
 
@@ -261,7 +261,14 @@ void setup() {  // This function sets everything up for logging.
   Serial.println("Plunger Reset");  // DEBUG
 
 
-} // end setup 
+} 
+
+// -------------------------------------------------------------------------------- end setup 
+
+
+
+
+
 
 
        
@@ -269,12 +276,6 @@ void setup() {  // This function sets everything up for logging.
 void loop() {  //This is the main function. It loops (repeats) forever.
   Serial.println("CheckStatus");  // DEBUG
   checkStatus();
-  
-  // PLUNGER AT REST
-  Serial.println("WormLoader");  // DEBUG
-  //wormLoader();
-  
-  
 
   if (modeToggle == 1 || modeToggle == 2) {     // If the mode is 1 OR 2
     colorTest();                                // The color wheel test is performed
@@ -291,13 +292,12 @@ void loop() {  //This is the main function. It loops (repeats) forever.
     Serial.println("Running as RFID Feeder");   // RFID only (mode 1). Feed birds.
   }
   
-  
+  delay(120);
   // Now we have the worm loaded, and the color set and wait for our bird to arrive.
      
-  while (leverPin == HIGH) {                 // While this switch is closed, nothing is happening
-    delay(1000);                             // We perform a short delay.
+  while (digitalRead(leverPin) == HIGH) {                 // While this switch is closed, nothing is happening
+    delay(60);                               // We perform a short delay.
     statusFlag = 1;                          // We tell the status that a worm is loaded, but there is nothing to report.
-    return;                                  // And then we completely exit the void loop()
   }                                          // 
 
   // EVENT - BIRD LANDS AT THIS FEEDER
@@ -334,28 +334,18 @@ void loop() {  //This is the main function. It loops (repeats) forever.
   while (digitalRead(doorSwitch) == HIGH) {          // While the trap door is not open
     motorCCW();                                      // Send the plunger down to open the door.
   }                                                  // And once it is down....
-  motorBrake();                                      // STOP
-  delay(30);                                         // Let that sink in
+//  motorBrake();                                      // STOP
+//  delay(30);                                         // Let that sink in
   motorOff();                                        // Stop the motor completely
   delay(1000);                                       // Wait 1 second...
   while (digitalRead(feederSwitch) == LOW) {         // While the plunger is down such that feederSwitch says it is not at rest
     motorCW();                                       // move the plunger up
   }                                                  // When it hits the button
-  motorBrake();                                      // STOP
-  delay(30);                                         // Let that sink in
   motorOff();                                        // Stop the motor completely
+  statusFlag = 1;
 
   // PLUNGER AT REST
 
-
-
-          
-                                                                                       
-     
-
-  
-      
- 
   delay(5);
 
   // Wes's little clock checker // DEBUG
@@ -375,7 +365,7 @@ void loop() {  //This is the main function. It loops (repeats) forever.
 
 
 
-// Wes addition - functions
+//---------------------------------------------------------------------------- Wes addition - functions
 
 void worm_ISR() {
   wormState =! wormState;
@@ -546,7 +536,6 @@ void wormLoader() {
     motorBrake();                               // Stop.
     delay(30);                                  // let that sink in
     motorOff();                                 // power down the motor
-    Serial.println("4sec pause");  // DEBUG
     delay(4000);                                // Give anything picked up by the motor time to roll into the chamber
                                                 // If nothing has hit the wormSwitch, then the wormState will still be HIGH.
     // PLUNGER AT TOP                           // If that is the case, while loop needs to go back to the bottom
@@ -556,21 +545,17 @@ void wormLoader() {
     while (digitalRead(feederSwitch) == HIGH) { // Until the plunger hits the bottom switch
       motorCCW();                               // continue moving down
     }  // PLUNGER AT BOTTOM                     // Once it hits the bottom switch...
-    delay(60);
-//    motorBrake();                               // stop
-//    delay(60);                                  // Wait a moment 
-//    motorOff();                                 // Stop the motor completely
-//    Serial.println("littlepaws");  // DEBUG
-//    delay(60);                                  // Wait a moment
+    motorBrake();                               // stop
+    delay(60);                                  // Wait a moment 
+    motorOff();                                 // Stop the motor completely
+    delay(60);                                  // Wait a moment
     while (digitalRead(feederSwitch) == LOW) {  // While the plunger is down
       motorCW();                                // Go back up to unpress it...
     }                                           // and then...
-    delay(60);
     motorBrake();                               // stop
     delay(60);                                  // Wait a moment 
-    motorOff();                                 // delay for a moment to deal with switch bounce
-    Serial.println("While Loop");  // DEBUG
-    delay(2000);
+    motorOff();                                 // 
+    delay(60);                                  // delay for a moment to deal with switch bounce
   }                                             // Or exit if you have the worm.
   delay(60);
   Serial.println("Worm Sign!!!!");  // DEBUG
@@ -581,11 +566,10 @@ void wormLoader() {
   while (digitalRead(feederSwitch) == HIGH) {   // Until the plunger hits the bottom switch
     motorCCW();                                 // continue moving down
   }                                             // Once it hits the bottom switch...
-  delay(60);
-  while (digitalRead(feederSwitch) == LOW) {
-    motorCW();
+  delay(60);                                    // wait a moment
+  while (digitalRead(feederSwitch) == LOW) {    // While the plunger is pressing the button
+    motorCW();                                  // 
   }
-  delay(60);
   motorBrake();                                 // stop
   delay(30);                                    // Let that sink in
   motorOff();                                   // Then cut power to the motor.
@@ -594,6 +578,7 @@ void wormLoader() {
 
   // PLUNGER AT REST 
   Serial.println("happydance"); // DEBUG
+  wormState = HIGH;                             // We force our wormState byte to be HIGH again.
 }
 
 void receiveFlags(int byteLength) {             // This is the function for Slaves to receive flags
@@ -607,6 +592,36 @@ void receiveFlags(int byteLength) {             // This is the function for Slav
     Serial.println(flags[i]); // DEBUG
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
